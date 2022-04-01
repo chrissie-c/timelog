@@ -1,0 +1,282 @@
+#!/bin/bash
+#
+# Copyright (C) 2022 Red Hat, Inc.  All rights reserved.
+#
+# Author: Christine Caulfield <ccaulfie@redhat.com>
+#
+# This software licensed under GPL-2.0+
+#
+# Run a command and show the time taken while it's running
+# command output is logged to a file called /tmp/LOG by default
+#
+# ANSI/VT100 escape sequences references:
+# See https://www2.ccs.neu.edu/research/gpc/VonaUtils/vona/terminal/vtansi.htm
+# and my long (if occasionally faulty) memory.
+#
+
+# Check command-line options
+FILE=/tmp/LOG
+USE_COLOURS=1
+USE_MILLIS=1
+COLOUR=32
+TIME_COLOUR=33
+FLASH_COLOUR=35
+STDERR_COLOUR=35
+MARK_STDERR=1
+COLOUR_LOG=0
+TRUNCATE=1
+QUIT=0
+
+print_usage()
+{
+    echo "$0 a screen based command-logger"
+    echo
+    echo "Runs a long-running command with logging to the screen & a file"
+    echo "with all lines timestamped, and stderr/stdout marked out"
+    echo
+    echo "$0 [options] <command>"
+    echo "   -n        Do not colour the log output"
+    echo "   -m        Do not show millseonds"
+    echo "   -t        Do not truncate long lines"
+    echo "   -r        Do not mark stderr (color on screen or ^ in log file)"
+    echo "   -l        Write colour codes to the logfile (default off)"
+    echo "   -c <num>  Colour for the log output (default $COLOUR)"
+    echo "   -s <num>  Colour for the timestamo output (default $TIME_COLOUR)"
+    echo "   -e <num>  Colour for the stderr output (default $STDERR_COLOUR)"
+    echo "   -f <file> name of file to log to (default $FILE)"
+    echo
+    exit
+}
+
+handle_ctrlc()
+{
+    echo -ne "\033[1;${LINES}r" # Reset scroll area
+    echo -ne "\033[2J" # Clear screen
+    echo -ne "\033[?25h" # Cursor on
+    QUIT=1
+}
+
+# Called on SIGWINCH
+handle_resize()
+{
+    # Get the screen size
+    resize >/dev/null 2>/dev/null
+    if [ "$?" != "0" ]
+    then
+	echo "resize command not installed. Assuming 80x25"
+	LINES=25
+	COLUMNS=80
+    else
+	eval `resize`
+    fi
+    TOP=$(($LINES-1))
+
+    # Set scrolling area
+    echo -ne "\033[H"
+    echo -ne "\033[1;${TOP}r"
+
+    # Save cursor position at bottom of scrolling area
+    echo -ne "\033[$(($LINES-1));0H\033[s"
+
+    # Clear status line and line above
+    echo -ne "\033[$(($LINES-1));0H\033[2K"
+    echo -ne "\033[${LINES};0H\033[2K"
+}
+
+
+# Read each line from the pipe and timestamp it
+# before writing it to the next pipe and the log file
+timestamp_log()
+{
+    # Clear the file
+    > $1
+
+    read
+    # Until EOF
+    while [ $? = 0 ]; do
+
+	# Format the timestamp
+	NOW=`date +"%s%N"`
+	NOWSECONDS=$(($NOW/1000000000))
+	TIME=$(($NOWSECONDS - $START))
+	HRS=$(($TIME / 3600))
+    	MINS=$(($TIME / 60 % 60))
+    	SECS=$(($TIME % 60))
+	MILLIS=$(($NOW/10000000 % 1000))
+	if [ "$USE_MILLIS" != "0" ]
+	then
+    	    PRINTABLE=`printf "%2d:%02d:%02d.%03d" $HRS $MINS $SECS $MILLIS`
+	else
+	    PRINTABLE=`printf "%2d:%02d:%02d" $HRS $MINS $SECS`
+	fi
+
+	if [ "$2" = "ERR" -a "$MARK_STDERR" = "1" ]
+	then
+	    STDERR_ON="\033[${STDERR_COLOUR}m"
+	    STDERR_LOG="^"
+	else
+	    STDERR_ON=""
+	    STDERR_LOG=" "
+	fi
+
+	# Truncate to screen width if needed
+	if [ "$TRUNCATE" = "1" ]
+	then
+	    if [ "$USE_MILLIS" = "1" ]
+	    then
+		CUT_REPLY=$(echo $REPLY|cut -c 1-$(($COLUMNS-13)))
+	    else
+		CUT_REPLY=$(echo $REPLY|cut -c 1-$(($COLUMNS-9)))
+	    fi
+	else
+	    CUT_REPLY=$REPLY
+	fi
+
+	# Print it to the screen
+	if [ "$USE_COLOURS" = "1" ]
+	then
+	    echo -e "\033[${TIME_COLOUR}m${PRINTABLE}\033[${COLOUR}m ${STDERR_ON}${CUT_REPLY}\033[0m"
+
+	else
+	    echo "${PRINTABLE} ${CUT_REPLY}"
+	fi
+
+	# Write the file
+	if [ "$COLOUR_LOGFILE" = "1" ]
+	then
+	    echo -e "\033[${TIME_COLOUR}m${PRINTABLE}\033[${COLOUR}m ${STDERR_ON}${CUT_REPLY}\033[0m" >> "$1"
+	else
+	    echo "${PRINTABLE}${STDERR_LOG} ${REPLY}" >> "$1"
+	fi
+
+	# Next line
+	read
+    done
+}
+
+# Print the file to the screen
+# Save cursor pos every line so the status line
+# doesn't break things
+taillog()
+{
+    read
+    # Until EOF
+    while [ $? = 0 ]; do
+
+	echo "${REPLY}"
+
+	# Save cursor pos
+	echo -ne "\033[s"
+
+	# Next line
+	read
+    done
+}
+
+### START HERE
+# Parse args
+while getopts "nmtlrc:s:e:f:" optflag; do
+	case "$optflag" in
+	n)
+	    USE_COLOURS="0"
+	    ;;
+	l)
+	    COLOUR_LOGFILE="1"
+	    ;;
+	t)
+	    TRUNCATE="0"
+	    ;;
+	m)
+	    USE_MILLIS="0"
+	    ;;
+	c)
+	    COLOUR="$OPTARG"
+	    ;;
+	r)
+	    MARK_STDERR="0"
+	    ;;
+	f)
+	    FILE="$OPTARG"
+	    ;;
+	s)
+	    TIME_COLOUR="$OPTARG"
+	    ;;
+	e)
+	    STDERR_COLOUR="$OPTARG"
+	    ;;
+	h)
+	    print_usage
+	    ;;
+	\?|:)
+	    print_usage
+	    ;;
+	esac
+done
+# The rest of it is the command+args
+COMMAND=${@:$OPTIND}
+
+# We need a command to run
+if [ -z "$COMMAND" ]
+then
+    print_usage
+fi
+
+# Get the screen size and cope with resizing
+handle_resize
+trap handle_resize SIGWINCH
+trap handle_ctrlc SIGINT
+echo -ne "\033[H\033[2J" # Clear screen
+echo -ne "\0337" # Save cursor pos
+echo -ne "\033[?25l" # Cursor off
+
+# prep
+RET="0"
+FLASHPHASE=0
+
+# Run the command in a subprocess
+# The pipeline order here is IMPORTANT
+START=`date +"%s"`
+$COMMAND 2> >(timestamp_log $FILE "ERR" 2>/dev/null) > >(timestamp_log $FILE 2>/dev/null) | taillog &
+PID=$!
+
+# Watch it
+while [ "$RET" -eq 0 ]
+do
+    FLASHPHASE=$((1-$FLASHPHASE))
+    if [ "$FLASHPHASE" = "1" ]
+    then
+	if [ "$USE_COLOURS" = "1" ]
+	then
+	    FLASH="\033[${FLASH_COLOUR}m*\033[0m"
+	else
+	    FLASH=" "
+	fi
+    else
+	FLASH="*"
+    fi
+
+    # Print command line at bottom of the screen
+    echo -ne "\033[${LINES};0H ${FLASH} ${PWD}\$ ${COMMAND}\033[K"
+    # Restore cursor pos
+    echo -ne "\033[u"
+
+    # Sleep and check if the process is still running
+    sleep 1
+    kill -0 $PID 2>/dev/null
+    RET=$?
+done
+
+if [ "$QUIT" = "0" ]
+then
+    # Normal completion
+    echo -en "\033[A\033[0J\033[${LINES};0H *** Finished, press ENTER"
+    read
+    echo -ne "\033[1;${LINES}r" # Reset scroll area
+    echo -en "\033[?25h" # Cursor on
+    echo -en "\033[2J" # CLS
+    # Visit the log
+    less +G -rf $FILE
+else
+    # Ctrl/C
+    echo "Log file is still in $FILE"
+fi
