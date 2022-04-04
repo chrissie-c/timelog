@@ -124,12 +124,12 @@ timestamp_log()
 	then
 	    if [ "$USE_MILLIS" = "1" ]
 	    then
-		CUT_REPLY=$(echo $REPLY|cut -c 1-$(($COLUMNS-13)))
+		CUT_REPLY=$(echo "$REPLY"|cut -c 1-$(($COLUMNS-13)))
 	    else
-		CUT_REPLY=$(echo $REPLY|cut -c 1-$(($COLUMNS-9)))
+		CUT_REPLY=$(echo "$REPLY"|cut -c 1-$(($COLUMNS-9)))
 	    fi
 	else
-	    CUT_REPLY=$REPLY
+	    CUT_REPLY="$REPLY"
 	fi
 
 	# Print it to the screen
