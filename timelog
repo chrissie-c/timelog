@@ -17,6 +17,7 @@
 # Check command-line options
 FILE=~/tmp/LOG
 PARAMFILE=~/tmp/timelog.params
+ABSOLUTE_TIMESTAMPS=0
 USE_COLOURS=1
 USE_MILLIS=1
 COLOUR=32
@@ -41,6 +42,7 @@ print_usage()
     echo "   -t        Do not truncate long lines"
     echo "   -r        Do not mark stderr (color on screen or ^ in log file)"
     echo "   -l        Write colour codes to the logfile (default off)"
+    echo "   -a        Show absolute timestamps (ie real time) rather than time since started"
     echo "   -c <num>  Colour for the log output (default $COLOUR)"
     echo "   -s <num>  Colour for the timestamo output (default $TIME_COLOUR)"
     echo "   -e <num>  Colour for the stderr output (default $STDERR_COLOUR)"
@@ -101,18 +103,23 @@ timestamp_log()
 	. $PARAMFILE
 
 	# Format the timestamp
-	NOW=`date +"%s%N"`
-	NOWSECONDS=$(($NOW/1000000000))
-	TIME=$(($NOWSECONDS - $START))
-	HRS=$(($TIME / 3600))
-    	MINS=$(($TIME / 60 % 60))
-    	SECS=$(($TIME % 60))
-	MILLIS=$(($NOW/10000000 % 1000))
-	if [ "$USE_MILLIS" != "0" ]
+	if [ "$ABSOLUTE_TIMESTAMPS" = "1" ]
 	then
-    	    PRINTABLE=`printf "%2d:%02d:%02d.%03d" $HRS $MINS $SECS $MILLIS`
+	    PRINTABLE=`date +%H:%M:%S`
 	else
-	    PRINTABLE=`printf "%2d:%02d:%02d" $HRS $MINS $SECS`
+	    NOW=`date +"%s%N"`
+	    NOWSECONDS=$(($NOW/1000000000))
+	    TIME=$(($NOWSECONDS - $START))
+	    HRS=$(($TIME / 3600))
+	    MINS=$(($TIME / 60 % 60))
+	    SECS=$(($TIME % 60))
+	    MILLIS=$(($NOW/10000000 % 1000))
+	    if [ "$USE_MILLIS" != "0" ]
+	    then
+		PRINTABLE=`printf "%2d:%02d:%02d.%03d" $HRS $MINS $SECS $MILLIS`
+	    else
+		PRINTABLE=`printf "%2d:%02d:%02d" $HRS $MINS $SECS`
+	    fi
 	fi
 
 	if [ "$2" = "ERR" -a "$MARK_STDERR" = "1" ]
@@ -180,13 +187,16 @@ taillog()
 
 ### START HERE
 # Parse args
-while getopts "nmtlrc:s:e:f:p:" optflag; do
+while getopts "nmtlrac:s:e:f:p:" optflag; do
 	case "$optflag" in
 	n)
 	    USE_COLOURS="0"
 	    ;;
 	l)
 	    COLOUR_LOGFILE="1"
+	    ;;
+	a)
+	    ABSOLUTE_TIMESTAMPS="1"
 	    ;;
 	t)
 	    TRUNCATE="0"
@@ -291,8 +301,17 @@ do
 	then
 	    USE_MILLIS="1"
 	fi
+	if [ "$KEYPRESS" = 'A' ]
+	then
+	    ABSOLUTE_TIMESTAMPS="1"
+	fi
+	if [ "$KEYPRESS" = 'a' ]
+	then
+	    ABSOLUTE_TIMESTAMPS="0"
+	fi
 	echo > $PARAMFILE "USE_MILLIS=\"$USE_MILLIS\""
 	echo >> $PARAMFILE "TRUNCATE=\"$TRUNCATE\""
+	echo >> $PARAMFILE "ABSOLUTE_TIMESTAMPS=\"$ABSOLUTE_TIMESTAMPS\""
     fi
 
     # Check if the process is still running
