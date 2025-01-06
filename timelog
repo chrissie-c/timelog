@@ -15,7 +15,8 @@
 #
 
 # Check command-line options
-FILE=/tmp/LOG
+FILE=~/tmp/LOG
+PARAMFILE=~/tmp/timelog.params
 USE_COLOURS=1
 USE_MILLIS=1
 COLOUR=32
@@ -44,6 +45,7 @@ print_usage()
     echo "   -s <num>  Colour for the timestamo output (default $TIME_COLOUR)"
     echo "   -e <num>  Colour for the stderr output (default $STDERR_COLOUR)"
     echo "   -f <file> name of file to log to (default $FILE)"
+    echo "   -p <file> name of file to store params in (default $PARAMFILE)"
     echo
     exit
 }
@@ -94,6 +96,9 @@ timestamp_log()
     read
     # Until EOF
     while [ $? = 0 ]; do
+
+	# Update params (is this overkill?)
+	. $PARAMFILE
 
 	# Format the timestamp
 	NOW=`date +"%s%N"`
@@ -175,7 +180,7 @@ taillog()
 
 ### START HERE
 # Parse args
-while getopts "nmtlrc:s:e:f:" optflag; do
+while getopts "nmtlrc:s:e:f:p:" optflag; do
 	case "$optflag" in
 	n)
 	    USE_COLOURS="0"
@@ -197,6 +202,9 @@ while getopts "nmtlrc:s:e:f:" optflag; do
 	    ;;
 	f)
 	    FILE="$OPTARG"
+	    ;;
+	p)
+	    PARAMFILE="$OPTARG"
 	    ;;
 	s)
 	    TIME_COLOUR="$OPTARG"
@@ -229,9 +237,12 @@ echo -ne "\033[H\033[2J" # Clear screen
 echo -ne "\0337" # Save cursor pos
 echo -ne "\033[?25l" # Cursor off
 
-# prep
+# Prep
 RET="0"
 FLASHPHASE=0
+mkdir ~/tmp 2>/dev/null
+echo > $PARAMFILE "USE_MILLIS=\"$USE_MILLIS\""
+echo >> $PARAMFILE "TRUNCATE=\"$TRUNCATE\""
 
 # Run the command in a subprocess
 # The pipeline order here is IMPORTANT
@@ -260,8 +271,32 @@ do
     # Restore cursor pos
     echo -ne "\033[u"
 
-    # Sleep and check if the process is still running
-    sleep 1
+    # Check for keypress
+    read -s -n1 -t1 KEYPRESS
+    if [ -n "$KEYPRESS" ]
+    then
+	if [ "$KEYPRESS" = 't' ]
+	then
+	    TRUNCATE="0"
+	fi
+	if [ "$KEYPRESS" = 'T' ]
+	then
+	    TRUNCATE="1"
+	fi
+	if [ "$KEYPRESS" = 'm' ]
+	then
+	    USE_MILLIS="0"
+	fi
+	if [ "$KEYPRESS" = 'M' ]
+	then
+	    USE_MILLIS="1"
+	fi
+	echo > $PARAMFILE "USE_MILLIS=\"$USE_MILLIS\""
+	echo >> $PARAMFILE "TRUNCATE=\"$TRUNCATE\""
+    fi
+
+    # Check if the process is still running
+    # 'read' above provides a 1s sleep so we don't busy-wait
     kill -0 $PID 2>/dev/null
     RET=$?
 done
